@@ -3,6 +3,10 @@ local annotation = g.dashboard.annotation;
 
 {
   _config+:: {
+    // Opt-in to multi cluster dashboards by overriding this and the clusterLabel.
+    showMultiCluster: false,
+    clusterLabel: 'cluster',
+
     // Selectors are inserted between {} in Prometheus queries.
     celerySelector: 'job=~".*celery.*"',
 

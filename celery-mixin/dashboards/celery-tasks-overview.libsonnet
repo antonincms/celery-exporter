@@ -44,10 +44,27 @@ local tbOverride = tbStandardOptions.override;
       ) +
       datasource.generalOptions.withLabel('Data source'),
 
+    local clusterVariable =
+      query.new(
+        'cluster',
+        'label_values(celery_worker_up{}, %(clusterLabel)s)' % $._config,
+      ) +
+      query.withDatasourceFromVariable(datasourceVariable) +
+      query.withSort(1) +
+      query.generalOptions.withLabel('Cluster') +
+      query.selectionOptions.withMulti(false) +
+      query.selectionOptions.withIncludeAll(false) +
+      query.refresh.onLoad() +
+      query.refresh.onTime() + (
+        if $._config.showMultiCluster
+        then query.generalOptions.showOnDashboard.withLabelAndValue()
+        else query.generalOptions.showOnDashboard.withNothing()
+      ),
+
     local namespaceVariable =
       query.new(
         'namespace',
-        'label_values(celery_worker_up{}, namespace)'
+        'label_values(celery_worker_up{%(clusterLabel)s="$cluster"}, namespace)' % $._config
       ) +
       query.withDatasourceFromVariable(datasourceVariable) +
       query.withSort(1) +
@@ -61,7 +78,7 @@ local tbOverride = tbStandardOptions.override;
     local jobVariable =
       query.new(
         'job',
-        'label_values(celery_worker_up{namespace="$namespace"}, job)'
+        'label_values(celery_worker_up{%(clusterLabel)s="$cluster", namespace="$namespace"}, job)' % $._config
       ) +
       query.withDatasourceFromVariable(datasourceVariable) +
       query.withSort(1) +
@@ -74,7 +91,7 @@ local tbOverride = tbStandardOptions.override;
     local queueNameVariable =
       query.new(
         'queue_name',
-        'label_values(celery_task_received_total{namespace="$namespace", job="$job", name!~"%(celeryIgnoredQueues)s"}, queue_name)' % $._config
+        'label_values(celery_task_received_total{%(clusterLabel)s="$cluster", namespace="$namespace", job="$job", name!~"%(celeryIgnoredQueues)s"}, queue_name)' % $._config
       ) +
       query.withDatasourceFromVariable(datasourceVariable) +
       query.withSort(1) +
@@ -86,6 +103,7 @@ local tbOverride = tbStandardOptions.override;
 
     local variables = [
       datasourceVariable,
+      clusterVariable,
       namespaceVariable,
       jobVariable,
       queueNameVariable,
@@ -94,11 +112,12 @@ local tbOverride = tbStandardOptions.override;
     local celeryWorkersQuery = |||
       count(
         celery_worker_up{
+          %(clusterLabel)s="$cluster",
           namespace="$namespace",
           job="$job",
         } == 1
       )
-    |||,
+    ||| % $._config,
     local celeryWorkersStatPanel =
       statPanel.new(
         'Workers',
@@ -121,11 +140,12 @@ local tbOverride = tbStandardOptions.override;
     local celeryWorkersActiveQuery = |||
       sum(
         celery_worker_tasks_active{
+          %(clusterLabel)s="$cluster",
           namespace="$namespace",
           job="$job",
         }
       )
-    |||,
+    ||| % $._config,
     local celeryWorkersActiveStatPanel =
       statPanel.new(
         'Tasks Active',
@@ -150,6 +170,7 @@ local tbOverride = tbStandardOptions.override;
         round(
           increase(
             celery_task_failed_total{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -157,7 +178,7 @@ local tbOverride = tbStandardOptions.override;
           )
         )
       )
-    |||,
+    ||| % $._config,
     local taskSucceeded1wQuery = std.strReplace(taskFailed1wQuery, 'failed', 'succeeded'),
 
     local tasksReceived1wQuery = std.strReplace(taskFailed1wQuery, 'failed', 'received'),
@@ -208,6 +229,7 @@ local tbOverride = tbStandardOptions.override;
       sum(
         rate(
           celery_task_runtime_sum{
+            %(clusterLabel)s="$cluster",
             namespace="$namespace",
             job="$job",
             queue_name=~"$queue_name"
@@ -218,13 +240,14 @@ local tbOverride = tbStandardOptions.override;
       sum(
         rate(
           celery_task_runtime_count{
+            %(clusterLabel)s="$cluster",
             namespace="$namespace",
             job="$job",
             queue_name=~"$queue_name"
           }[1w]
         )
       ) > 0
-    |||,
+    ||| % $._config,
     local taskRuntime1wStatPanel =
       statPanel.new(
         'Average Runtime for Tasks [1w]',
@@ -249,6 +272,7 @@ local tbOverride = tbStandardOptions.override;
         sum (
           increase(
             celery_task_failed_total{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -256,7 +280,7 @@ local tbOverride = tbStandardOptions.override;
           ) > 0
         )  by (job, name)
       )
-    |||,
+    ||| % $._config,
     local tasksFailed1wTable =
       tablePanel.new(
         'Top Failed Tasks [1w]',
@@ -314,6 +338,7 @@ local tbOverride = tbStandardOptions.override;
         sum (
           increase(
             celery_task_failed_total{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -321,7 +346,7 @@ local tbOverride = tbStandardOptions.override;
           )
         ) by (job, exception) > 0
       )
-    |||,
+    ||| % $._config,
 
     local taskExceptions1wTable =
       tablePanel.new(
@@ -366,6 +391,7 @@ local tbOverride = tbStandardOptions.override;
       sum (
         rate(
           celery_task_runtime_sum{
+            %(clusterLabel)s="$cluster",
             namespace="$namespace",
             job="$job",
             queue_name=~"$queue_name"
@@ -376,13 +402,14 @@ local tbOverride = tbStandardOptions.override;
       sum (
         rate(
           celery_task_runtime_count{
+            %(clusterLabel)s="$cluster",
             namespace="$namespace",
             job="$job",
             queue_name=~"$queue_name"
           }[1w]
         )
       ) by (name) > 0
-    |||,
+    ||| % $._config,
     local tasksRuntime1wTable =
       tablePanel.new(
         'Top Average Task Runtime [1w]',
@@ -438,12 +465,13 @@ local tbOverride = tbStandardOptions.override;
     local celeryQueueLengthQuery = |||
       sum (
         celery_queue_length{
+          %(clusterLabel)s="$cluster",
           namespace="$namespace",
           job="$job",
           queue_name=~"$queue_name"
         }
       ) by (job, queue_name)
-    |||,
+    ||| % $._config,
 
 
     local celeryQueueLengthTimeSeriesPanel =
@@ -477,6 +505,7 @@ local tbOverride = tbStandardOptions.override;
         round(
           increase(
             celery_task_failed_total{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -484,7 +513,7 @@ local tbOverride = tbStandardOptions.override;
           )
         )
       ) by (job) > 0
-    |||,
+    ||| % $._config,
     local taskSucceededQuery = std.strReplace(taskFailedQuery, 'failed', 'succeeded'),
     local taskSentQuery = std.strReplace(taskFailedQuery, 'failed', 'sent'),
     local taskReceivedQuery = std.strReplace(taskFailedQuery, 'failed', 'received'),
@@ -611,6 +640,7 @@ local tbOverride = tbStandardOptions.override;
         round(
           increase(
             celery_task_failed_total{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -618,7 +648,7 @@ local tbOverride = tbStandardOptions.override;
           )
         )
       )
-    |||,
+    ||| % $._config,
     local taskSucceededIntervalQuery = std.strReplace(taskFailedIntervalQuery, 'failed', 'succeeded'),
     local taskSentIntervalQuery = std.strReplace(taskFailedIntervalQuery, 'failed', 'sent'),
     local taskReceivedIntervalQuery = std.strReplace(taskFailedIntervalQuery, 'failed', 'received'),
@@ -699,6 +729,7 @@ local tbOverride = tbStandardOptions.override;
         sum(
           irate(
             celery_task_runtime_bucket{
+              %(clusterLabel)s="$cluster",
               namespace="$namespace",
               job="$job",
               queue_name=~"$queue_name"
@@ -706,7 +737,7 @@ local tbOverride = tbStandardOptions.override;
           ) > 0
         ) by (job, le)
       )
-    |||,
+    ||| % $._config,
     local tasksRuntimeP95Query = std.strReplace(tasksRuntimeP50Query, '0.50', '0.95'),
     local tasksRuntimeP99Query = std.strReplace(tasksRuntimeP50Query, '0.50', '0.99'),
 
